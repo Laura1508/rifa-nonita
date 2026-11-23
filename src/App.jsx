@@ -4,7 +4,7 @@ import "./App.css";
 const TOTAL_NUMBERS = 100;
 
 const API_URL =
-  "https://script.google.com/macros/s/AKfycbwxZ4Reup7oIf18-Lx__w5w-DtMsY29qWmckA0KgJz5rUb_bb73G98mKNixPZkbD0Nf/exec";
+  "https://script.google.com/macros/s/AKfycbz4HotRCOUuqM9zqQFBgBE9YTxL3JS6KK2V91J9pyFgbgJ2HwLzS3dv9Nf0BksTU77h/exec";
 
 // ==========================================
 // CONSULTAR GOOGLE SHEETS MEDIANTE JSONP
