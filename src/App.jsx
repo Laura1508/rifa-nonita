@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useCallback } from "react";
 import "./App.css";
 
@@ -20,6 +21,7 @@ function loadRecordsFromGoogle() {
 
     const script = document.createElement("script");
     let timeout;
+    let completed = false;
 
     const cleanup = () => {
       clearTimeout(timeout);
@@ -27,20 +29,26 @@ function loadRecordsFromGoogle() {
       script.remove();
     };
 
-    timeout = setTimeout(() => {
+    const fail = (error) => {
+      if (completed) return;
+      completed = true;
       cleanup();
-      reject(
+      reject(error);
+    };
+
+    timeout = setTimeout(() => {
+      fail(
         new Error(
           "Tiempo de espera agotado al consultar Google Sheets."
         )
       );
-    }, 15000);
+    }, 20000);
 
     window[callbackName] = (result) => {
-      cleanup();
+      if (completed) return;
 
       if (!result || !result.success) {
-        reject(
+        fail(
           new Error(
             result?.message ||
               "Google Sheets no pudo cargar los registros."
@@ -49,13 +57,16 @@ function loadRecordsFromGoogle() {
         return;
       }
 
+      completed = true;
+      cleanup();
       resolve(result);
     };
 
     script.onerror = () => {
-      cleanup();
-      reject(
-        new Error("No fue posible conectar con Google Sheets.")
+      fail(
+        new Error(
+          "No fue posible conectar con Google Sheets."
+        )
       );
     };
 
@@ -68,9 +79,6 @@ function loadRecordsFromGoogle() {
 
 // ==========================================
 // ENVIAR INFORMACIÓN MEDIANTE FORMULARIO
-// No depende de leer una respuesta CORS.
-// La confirmación real se hace consultando
-// nuevamente Google Sheets mediante JSONP.
 // ==========================================
 
 function sendToGoogle(data) {
@@ -82,12 +90,14 @@ function sendToGoogle(data) {
       Math.floor(Math.random() * 100000);
 
     const iframe = document.createElement("iframe");
+
     iframe.name = iframeName;
     iframe.src = "about:blank";
     iframe.style.display = "none";
     iframe.setAttribute("aria-hidden", "true");
 
     const form = document.createElement("form");
+
     form.method = "POST";
     form.action = API_URL;
     form.target = iframeName;
@@ -95,62 +105,60 @@ function sendToGoogle(data) {
     form.style.display = "none";
 
     const payload = document.createElement("input");
+
     payload.type = "hidden";
     payload.name = "payload";
     payload.value = JSON.stringify(data);
+
     form.appendChild(payload);
 
     let completed = false;
+    let submitted = false;
     let timeout;
 
     const cleanup = () => {
       clearTimeout(timeout);
+      iframe.removeEventListener("load", handleLoad);
       form.remove();
       iframe.remove();
     };
 
     const fail = (error) => {
       if (completed) return;
+
       completed = true;
       cleanup();
       reject(error);
     };
 
-    // La primera carga corresponde a about:blank.
-    // Después se envía el formulario y se espera
-    // la navegación de respuesta de Apps Script.
-    iframe.addEventListener(
-      "load",
-      () => {
-        if (completed) return;
+    const handleLoad = () => {
+      if (completed) return;
 
-        // Si el formulario todavía no se ha enviado,
-        // esta es la carga inicial del iframe.
-        if (!form.dataset.submitted) {
-          form.dataset.submitted = "true";
+      // Primera carga: about:blank.
+      // En este momento enviamos el formulario.
+      if (!submitted) {
+        submitted = true;
 
-          try {
-            form.submit();
-          } catch (error) {
-            fail(
-              new Error(
-                "No fue posible enviar los datos a Google."
-              )
-            );
-          }
-
-          return;
+        try {
+          form.submit();
+        } catch (error) {
+          fail(
+            new Error(
+              "No fue posible enviar los datos a Google."
+            )
+          );
         }
 
-        // Esta carga indica que terminó la navegación
-        // del formulario. No confirma por sí sola el guardado;
-        // la confirmación se realiza con una consulta JSONP.
-        completed = true;
-        cleanup();
-        resolve(true);
-      },
-      { once: false }
-    );
+        return;
+      }
+
+      // Segunda carga: respuesta de Google Apps Script.
+      completed = true;
+      cleanup();
+      resolve(true);
+    };
+
+    iframe.addEventListener("load", handleLoad);
 
     timeout = setTimeout(() => {
       fail(
@@ -158,8 +166,9 @@ function sendToGoogle(data) {
           "Google no respondió a tiempo. Verifica tu conexión e intenta nuevamente."
         )
       );
-    }, 25000);
+    }, 30000);
 
+    // Agregar primero el iframe y después el formulario.
     document.body.appendChild(iframe);
     document.body.appendChild(form);
   });
@@ -187,7 +196,9 @@ function App() {
   const [records, setRecords] = useState(() => {
     try {
       return (
-        JSON.parse(localStorage.getItem("rifa-registros")) || {}
+        JSON.parse(
+          localStorage.getItem("rifa-registros")
+        ) || {}
       );
     } catch {
       return {};
@@ -279,7 +290,10 @@ function App() {
         const data = await refreshRecords();
 
         if (active) {
-          console.log("Registros recibidos:", data);
+          console.log(
+            "Registros recibidos de Google:",
+            data
+          );
         }
       } catch (error) {
         console.error(
@@ -289,6 +303,7 @@ function App() {
 
         if (active) {
           setConnected(false);
+
           setMessage(
             "No fue posible conectar con Google Sheets. Los datos guardados en este dispositivo pueden estar desactualizados. No realices reservas hasta recuperar la conexión."
           );
@@ -366,7 +381,7 @@ function App() {
   // ==========================================
 
   const openForm = () => {
-    if (!connected) {
+    if (!connected || loading) {
       setMessage(
         "No hay conexión con Google Sheets. No es posible reservar en este momento."
       );
@@ -425,8 +440,11 @@ function App() {
       );
       return;
     }
+
     if (!cleanName || !cleanPhone) {
-      setMessage("Completa el nombre y el celular.");
+      setMessage(
+        "Completa el nombre y el celular."
+      );
       return;
     }
 
@@ -435,7 +453,9 @@ function App() {
       !proof &&
       !(editingNumber && records[editingNumber]?.proofName)
     ) {
-      setMessage("Adjunta el comprobante de pago.");
+      setMessage(
+        "Adjunta el comprobante de pago."
+      );
       return;
     }
 
@@ -443,10 +463,10 @@ function App() {
     setMessage("Verificando disponibilidad...");
 
     try {
-      // Consultar primero la información actual del servidor.
+      // Consultar información actual del servidor.
       const currentRecords = await refreshRecords();
 
-      // Validar que el número que se está editando siga existiendo.
+      // Validar que el número que se edita siga existiendo.
       if (
         editingNumber &&
         !currentRecords[editingNumber]
@@ -457,7 +477,9 @@ function App() {
       }
 
       // Validar que el celular no esté asociado a otro número.
-      const duplicate = Object.entries(currentRecords).some(
+      const duplicate = Object.entries(
+        currentRecords
+      ).some(
         ([number, record]) =>
           String(record.phone || "").trim() === cleanPhone &&
           number !== editingNumber
@@ -470,6 +492,10 @@ function App() {
       }
 
       const updated = { ...currentRecords };
+
+      // ==========================================
+      // ACTUALIZAR REGISTRO EXISTENTE
+      // ==========================================
 
       if (editingNumber) {
         updated[editingNumber] = {
@@ -485,6 +511,10 @@ function App() {
             "",
         };
       } else {
+        // ==========================================
+        // VALIDAR DISPONIBILIDAD DE NUEVOS NÚMEROS
+        // ==========================================
+
         for (const number of selected) {
           if (currentRecords[number]) {
             throw new Error(
@@ -492,6 +522,10 @@ function App() {
             );
           }
         }
+
+        // ==========================================
+        // PREPARAR NUEVOS REGISTROS
+        // ==========================================
 
         for (const number of selected) {
           updated[number] = {
@@ -505,17 +539,41 @@ function App() {
         }
       }
 
-      setMessage("Enviando registro a Google Sheets...");
+      // ==========================================
+      // ENVIAR ÚNICAMENTE REGISTROS MODIFICADOS
+      // ==========================================
 
-      await sendToGoogle({
-        action: "save",
-        records: updated,
-      });
+      setMessage(
+        "Enviando registro a Google Sheets..."
+      );
 
-      // Confirmar el guardado consultando Google Sheets.
       const numbersToCheck = editingNumber
         ? [editingNumber]
         : [...selected];
+
+      const recordsToSave = {};
+
+      numbersToCheck.forEach((number) => {
+        recordsToSave[number] = updated[number];
+      });
+
+      console.log(
+        "Registros enviados a Google Sheets:",
+        recordsToSave
+      );
+
+      await sendToGoogle({
+        action: "save",
+        records: recordsToSave,
+      });
+
+      // ==========================================
+      // CONFIRMAR GUARDADO EN GOOGLE SHEETS
+      // ==========================================
+
+      setMessage(
+        "Guardando y verificando información..."
+      );
 
       let confirmed = false;
       let lastReadError = null;
@@ -532,13 +590,20 @@ function App() {
             return (
               saved &&
               String(saved.phone || "").trim() === cleanPhone &&
+              saved.name === cleanName &&
               saved.status === payment
             );
           });
 
-          if (confirmed) break;
+          if (confirmed) {
+            console.log(
+              "Registro confirmado en Google Sheets."
+            );
+            break;
+          }
         } catch (readError) {
           lastReadError = readError;
+
           console.warn(
             `Verificación ${attempt + 1} fallida:`,
             readError
@@ -554,6 +619,10 @@ function App() {
         );
       }
 
+      // ==========================================
+      // LIMPIAR FORMULARIO
+      // ==========================================
+
       setSelected([]);
       setShowForm(false);
       setEditingNumber(null);
@@ -561,10 +630,12 @@ function App() {
       setPhone("");
       setPayment("Debe");
       setProof(null);
+      setPerformedBy("");
 
       setMessage(
         "¡Registro guardado correctamente!"
       );
+
     } catch (error) {
       console.error(
         "Error guardando registro:",
@@ -611,7 +682,7 @@ function App() {
     setAdminError("");
 
     try {
-      // Confirmar primero que el número exista en Google.
+      // Confirmar que el número exista en Google.
       const currentRecords = await refreshRecords();
 
       if (!currentRecords[adminNumber]) {
@@ -620,13 +691,17 @@ function App() {
         );
       }
 
+      // Enviar solicitud de liberación.
       await sendToGoogle({
         action: "release",
         number: adminNumber,
         code: adminCode.trim(),
       });
 
-      // Confirmar que desapareció de los registros activos.
+      // ==========================================
+      // CONFIRMAR LIBERACIÓN
+      // ==========================================
+
       let released = false;
       let lastReadError = null;
 
@@ -642,6 +717,7 @@ function App() {
           }
         } catch (readError) {
           lastReadError = readError;
+
           console.warn(
             `Verificación de liberación ${attempt + 1} fallida:`,
             readError
@@ -660,10 +736,13 @@ function App() {
       setShowAdmin(false);
       setAdminCode("");
       setAdminError("");
+
       setMessage(
         `El número ${adminNumber} está disponible nuevamente.`
       );
+
       setAdminNumber(null);
+
     } catch (error) {
       console.error(
         "Error liberando número:",
@@ -738,6 +817,7 @@ function App() {
           <div>
             ⭐ JUEGA CON LAS 2 ÚLTIMAS CIFRAS DE LA LOTERÍA DE BOYACÁ ⭐
           </div>
+
           <strong>
             PREMIO: $1.000.000 PESOS
           </strong>
@@ -758,9 +838,13 @@ function App() {
             {loading ? (
               <span>Consultando registros...</span>
             ) : connected ? (
-              <span>🟢 Conectado: registros actualizados</span>
+              <span>
+                🟢 Conectado: registros actualizados
+              </span>
             ) : (
-              <span>🔴 Sin conexión con Google Sheets</span>
+              <span>
+                🔴 Sin conexión con Google Sheets
+              </span>
             )}
           </div>
 
@@ -770,10 +854,12 @@ function App() {
               <i className="green-dot" />
               Disponible
             </span>
+
             <span>
               <i className="red-dot" />
               Ocupado
             </span>
+
             <span>
               <i className="yellow-dot" />
               Pendiente
@@ -863,7 +949,10 @@ function App() {
         </footer>
       </div>
 
+      {/* ====================================== */}
       {/* MODAL DE REGISTRO */}
+      {/* ====================================== */}
+
       {showForm && (
         <div
           className="modal-backdrop"
@@ -891,6 +980,7 @@ function App() {
             </p>
 
             <label>Nombre completo</label>
+
             <input
               value={name}
               onChange={(event) =>
@@ -901,6 +991,7 @@ function App() {
             />
 
             <label>Número de celular</label>
+
             <input
               value={phone}
               onChange={(event) =>
@@ -912,6 +1003,7 @@ function App() {
             />
 
             <label>Estado del pago</label>
+
             <select
               value={payment}
               onChange={(event) =>
@@ -921,7 +1013,10 @@ function App() {
               <option value="Debe">Debe</option>
               <option value="Pagó">Pago</option>
             </select>
-            <label>Nombre de quien realiza el registro</label>
+
+            <label>
+              Nombre de quien realiza el registro
+            </label>
 
             <input
               type="text"
@@ -932,9 +1027,11 @@ function App() {
               placeholder="Nombre de quien registra"
               required
             />
+
             {payment === "Pagó" && (
               <>
                 <label>Adjunta tu comprobante</label>
+
                 <input
                   type="file"
                   accept="image/*,.pdf"
@@ -983,7 +1080,10 @@ function App() {
         </div>
       )}
 
+      {/* ====================================== */}
       {/* MODAL DE ADMINISTRADOR */}
+      {/* ====================================== */}
+
       {showAdmin && (
         <div
           className="modal-backdrop"
@@ -1015,6 +1115,7 @@ function App() {
             </p>
 
             <label>Código de administrador</label>
+
             <input
               type="password"
               value={adminCode}
