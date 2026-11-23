@@ -213,6 +213,7 @@ function App() {
   const [phone, setPhone] = useState("");
   const [payment, setPayment] = useState("Debe");
   const [proof, setProof] = useState(null);
+  const [performedBy, setPerformedBy] = useState("");
 
   // ==========================================
   // MENSAJES
@@ -349,6 +350,7 @@ function App() {
       setProof(null);
       setSelected([key]);
       setShowForm(true);
+      setPerformedBy("");
       return;
     }
 
@@ -385,6 +387,7 @@ function App() {
     setProof(null);
     setMessage("");
     setShowForm(true);
+    setPerformedBy("");
   };
 
   // ==========================================
@@ -400,6 +403,7 @@ function App() {
     setPhone("");
     setPayment("Debe");
     setProof(null);
+    setPerformedBy("");
   };
 
   // ==========================================
@@ -413,7 +417,14 @@ function App() {
 
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
+    const cleanPerformedBy = performedBy.trim();
 
+    if (!cleanPerformedBy) {
+      setMessage(
+        "Ingresa el nombre de la persona que realiza el registro."
+      );
+      return;
+    }
     if (!cleanName || !cleanPhone) {
       setMessage("Completa el nombre y el celular.");
       return;
@@ -466,6 +477,7 @@ function App() {
           name: cleanName,
           phone: cleanPhone,
           status: payment,
+          performedBy: cleanPerformedBy,
           date: new Date().toISOString(),
           proofName:
             proof?.name ||
@@ -486,6 +498,7 @@ function App() {
             name: cleanName,
             phone: cleanPhone,
             status: payment,
+            performedBy: cleanPerformedBy,
             date: new Date().toISOString(),
             proofName: proof?.name || "",
           };
@@ -908,7 +921,17 @@ function App() {
               <option value="Debe">Debe</option>
               <option value="Pagó">Pago</option>
             </select>
+            <label>Nombre de quien realiza el registro</label>
 
+            <input
+              type="text"
+              value={performedBy}
+              onChange={(event) =>
+                setPerformedBy(event.target.value)
+              }
+              placeholder="Nombre de quien registra"
+              required
+            />
             {payment === "Pagó" && (
               <>
                 <label>Adjunta tu comprobante</label>
